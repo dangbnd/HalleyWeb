@@ -1,7 +1,8 @@
 export const LS = {
   AUTH:'auth', USERS:'users', AUDIT:'audit',
   PRODUCTS:'products', CATEGORIES:'categories', MENU:'menu', PAGES:'pages',
-  TAGS:'tags', SCHEMES:'schemes', TYPES:'types', LEVELS:'levels'
+  TAGS:'tags', SCHEMES:'schemes', TYPES:'types', LEVELS:'levels',
+  FB_URLS: "fb_urls",
 };
 
 export function readLS(key, fallback){

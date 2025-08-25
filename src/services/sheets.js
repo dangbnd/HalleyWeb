@@ -64,3 +64,119 @@ export function normalizeImageUrl(u) {
   return encodeURI(base + s.replace(/^\/+/, ""));
 }
 
+// thêm hàm mới
+export async function fetchFbUrls({ sheetId, gid }) {
+  const rows = await fetchSheetRows({ sheetId, gid });
+
+  const pick = (r) =>
+    r.url || r.fb || r.fb_url || r.post || r.link || r.col0 || r.col1 || "";
+
+  const out = [];
+  for (const r of rows) {
+    String(pick(r))
+      .split(/[\n,;|]/)
+      .map((s) => s.trim())
+      .filter((s) =>
+        /^(https?:\/\/)?((m|www)\.)?(facebook\.com|fb\.watch)\//i.test(s)
+      )
+      .forEach((s) => out.push(s));
+  }
+  return [...new Set(out)];
+}
+
+// Bổ sung dưới đây
+
+const csvToRows = (csv) => {
+  const lines = csv.trim().split(/\r?\n/);
+  const head = lines.shift().split(",").map(s=>s.trim());
+  return lines.map(line=>{
+    const cols = line.split(","); // dữ liệu thuần, không có dấu phẩy trong ô
+    const o = {};
+    head.forEach((h,i)=>o[h.trim()] = (cols[i]??"").trim());
+    return o;
+  });
+};
+
+export async function fetchTabAsObjects({ sheetId, gid }) {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
+  const res = await fetch(url);
+  const text = await res.text();
+  const rows = csvToRows(text);
+  return rows;
+}
+
+/* ======= MAPPERS ======= */
+export const mapCategories = (rows) =>
+  rows
+    .filter(r => r.key)
+    .map(r => ({ key: r.key, title: r.title || r.key }));
+
+export const mapTags = (rows) =>
+  rows
+    .filter(r => r.id || r.label)
+    .map(r => ({ id: r.id || (r.label||"").toLowerCase().replace(/\s+/g,'-'), label: r.label || r.id }));
+
+// sizes: "6|Size 6,7|Size 7"
+const parseSizes = (s="") =>
+  s.split(/\s*,\s*/).filter(Boolean).map(x=>{
+    const [key,label] = x.split("|");
+    return { key: (key||"").trim(), label: (label||key||"").trim() };
+  });
+
+export const mapSchemes = (rows) =>
+  rows.filter(r=>r.id).map(r=>({
+    id: r.id,
+    name: r.name || r.id,
+    sizes: parseSizes(r.sizes||""),
+  }));
+
+export const mapTypes = (rows) =>
+  rows.filter(r=>r.id).map(r=>({
+    id: r.id,
+    name: r.name || r.id,
+    schemeId: r.schemeId || r.scheme || "",
+  }));
+
+// prices: "6:290000,7:350000"
+const parsePrices = (s="") => Object.fromEntries(
+  s.split(/\s*,\s*/).filter(Boolean).map(p=>{
+    const [k,v] = p.split(":");
+    return [(k||"").trim(), Number(v||0)];
+  })
+);
+export const mapLevels = (rows) =>
+  rows.filter(r=>r.id).map(r=>({
+    id: r.id,
+    name: r.name || r.id,
+    schemeId: r.schemeId || r.scheme || "",
+    prices: parsePrices(r.prices||""),
+  }));
+
+export const mapPages = (rows) =>
+  rows.filter(r=>r.key).map(r=>({
+    key: r.key,
+    title: r.title || r.key,
+    body: r.body || "",
+  }));
+
+// menu: key, label, parent(optional), order(optional number)
+export const mapMenu = (rows) => {
+  const items = rows.filter(r=>r.key).map(r=>({
+    key: r.key,
+    title: r.label || r.title || r.key,
+    parent: r.parent || "",
+    order: Number(r.order||0),
+  }));
+  const byKey = Object.fromEntries(items.map(i=>[i.key,{...i,children:[]}]));
+  const roots = [];
+  items.forEach(i=>{
+    if (i.parent && byKey[i.parent]) byKey[i.parent].children.push(byKey[i.key]);
+    else roots.push(byKey[i.key]);
+  });
+  const sortTree = (nodes)=>{ nodes.sort((a,b)=>a.order-b.order); nodes.forEach(n=>sortTree(n.children)); };
+  sortTree(roots);
+  // bỏ các field phụ
+  const clean = (n)=>({ key:n.key, title:n.title, children: n.children.map(clean) });
+  return roots.map(clean);
+};
+
