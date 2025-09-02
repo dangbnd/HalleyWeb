@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import ImageUploader from "./ImageUploader.jsx";
 import TagPicker from "./TagPicker.jsx";
 import { LS, writeLS } from "../../utils.js";
+import { sizesForProduct } from "../../services/sheets";
 
 export default function ProductEditor({ product, onSave, onCancel, categories, types, schemes, levels, tags, setTags }) {
   const isEdit = Boolean(product?.id);
@@ -15,6 +16,7 @@ export default function ProductEditor({ product, onSave, onCancel, categories, t
   const type = useMemo(()=>types.find(t=>t.id===typeId),[types,typeId]);
   const scheme = useMemo(()=>schemes.find(s=>s.id===type?.schemeId),[schemes,type]);
   const [levelId,setLevelId]=useState(product?.pricing?.levelId||"");
+  const availableSizes = sizesForProduct(product, types, schemes);
   const levelOptions = useMemo(()=>levels.filter(l=>l.schemeId===scheme?.id),[levels,scheme]);
   useEffect(()=>{ if(levelOptions.length && !levelOptions.some(l=>l.id===levelId)) setLevelId(levelOptions[0]?.id||""); },[scheme?.id]);
 

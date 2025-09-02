@@ -16,26 +16,28 @@ function getPrice(p) {
   return Number.isFinite(n) ? n : null;
 }
 
-export function ProductList({ products = [] }) {
+export function ProductList({ products = [], onImageClick }) {
   return (
-    <section className="max-w-6xl mx-auto p-4">
-      <h2 className="text-xl font-semibold mb-3">Sản phẩm</h2>
-
-      <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-        {products.map((p) => {
-          const price = getPrice(p);
-          return (
-            <div key={p.id} data-testid={`product-${p.id}`} className="group border rounded-2xl p-3">
-              <div className="relative aspect-square rounded-xl overflow-hidden mb-2">
-                <ProductImage product={p} />
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
+      {products.map((p) => (
+        <article key={p.id} className="bg-white rounded-xl border overflow-hidden">
+          <button
+            className="relative block aspect-square w-full cursor-zoom-in"
+            onClick={() => onImageClick?.(p)}
+            aria-label={`Xem nhanh ${p.name}`}
+          >
+            <ProductImage product={p} className="absolute inset-0 w-full h-full object-cover" />
+          </button>
+          <div className="p-3">
+            <div className="text-sm font-medium truncate">{p.name}</div>
+            {p.price ? (
+              <div className="text-rose-600 text-sm">
+                {Number(p.price).toLocaleString("vi-VN")}₫
               </div>
-
-              <div className="text-sm font-medium line-clamp-2">{p.name}</div>
-              <div className="text-xs text-rose-700 font-semibold">{price != null ? VND.format(price) : "—"}</div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
+            ) : null}
+          </div>
+        </article>
+      ))}
+    </div>
   );
 }

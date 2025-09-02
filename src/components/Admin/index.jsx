@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { can, guard, authApi, writeLS, readLS, LS, audit, readAudit } from "../../utils.js";
 import { DATA } from "../../data.js";
 import ProductEditor from "./ProductEditor.jsx";
@@ -34,8 +34,7 @@ export default function Admin({
         <Tab t="categories" tab={tab} setTab={setTab}>Danh mục</Tab>
         <Tab t="menu"       tab={tab} setTab={setTab}>Menu</Tab>
         <Tab t="pages"      tab={tab} setTab={setTab}>Pages</Tab>
-        <Tab t="types"      tab={tab} setTab={setTab}>Loại bánh</Tab>
-        <Tab t="schemes"    tab={tab} setTab={setTab}>Bảng size</Tab>
+        <Tab t="typeSizes"  tab={tab} setTab={setTab}>Loại & Size</Tab>
         <Tab t="levels"     tab={tab} setTab={setTab}>Level giá</Tab>
         <Tab t="tags"       tab={tab} setTab={setTab}>Tags</Tab>
         <Tab t="users"      tab={tab} setTab={setTab}>Users</Tab>
@@ -57,19 +56,33 @@ export default function Admin({
       )}
 
       {tab==="pages"   && <PagesPanel user={user} pages={pages} setPages={setPages} />}
-      {tab==="types"   && <TypesPanel user={user} types={types} setTypes={setTypes} schemes={schemes} />}
-      {tab==="schemes" && <SchemesPanel user={user} schemes={schemes} setSchemes={setSchemes} />}
+
+      {/* GỘP Loại + Size vào 1 panel */}
+      {tab==="typeSizes" && (
+        <TypeSizePanel
+          user={user}
+          types={types} setTypes={setTypes}
+          schemes={schemes} setSchemes={setSchemes}
+        />
+      )}
+
       {tab==="levels"  && <LevelsPanel user={user} levels={levels} setLevels={setLevels} schemes={schemes} />}
+
       {tab==="tags"    && <TagsPanel user={user} tags={tags} setTags={setTags} />}
+
       {tab==="users"   && <UsersPanel user={user} />}
+
       {tab==="audit"   && <AuditPanel />}
     </div>
   );
 }
+
 function Tab({ t, tab, setTab, children }) {
   const active = tab === t;
   return <button className={`px-3 py-1 rounded border ${active ? "bg-gray-100" : ""}`} onClick={()=>setTab(t)}>{children}</button>;
 }
+
+/* ---------------- Products ---------------- */
 function ProductsPanel({ user, products, setProducts, categories, tags, setTags, schemes, types, levels }) {
   const canCreate=can(user,"create","products"), canUpdate=can(user,"update","products"), canDelete=can(user,"delete","products");
   const [showForm, setShowForm] = useState(false); const [editing, setEditing] = useState(null);
@@ -114,6 +127,8 @@ function ProductsPanel({ user, products, setProducts, categories, tags, setTags,
     </div>
   );
 }
+
+/* ---------------- Categories ---------------- */
 function CategoriesPanel({ user, categories, setCategories }) {
   const add = guard(user,"create","categories", (key, title) => {
     const next = [{ key, title: title || key }, ...categories];
@@ -162,6 +177,8 @@ function CategoriesPanel({ user, categories, setCategories }) {
     </div>
   );
 }
+
+/* ---------------- Pages ---------------- */
 function PagesPanel({ user, pages, setPages }) {
   const canEdit = can(user,"update","pages");
   const [key,setKey]=useState(""),[title,setTitle]=useState(""),[body,setBody]=useState("");
@@ -190,82 +207,158 @@ function PagesPanel({ user, pages, setPages }) {
     </div>
   );
 }
-function TypesPanel({ user, types, setTypes, schemes }) {
-  const add = guard(user,"update","settings", (name, schemeId)=>{ const id=name.toLowerCase().replace(/\s+/g,'-'); const next=[...types,{id,name,schemeId}]; setTypes(next); writeLS(LS.TYPES,next); audit("type.add",{id}); });
-  const remove = guard(user,"update","settings", (id)=>{ const next=types.filter(t=>t.id!==id); setTypes(next); writeLS(LS.TYPES,next); audit("type.remove",{id}); });
-  const update = guard(user,"update","settings", (id,patch)=>{ const next=types.map(t=>t.id===id?{...t,...patch}:t); setTypes(next); writeLS(LS.TYPES,next); audit("type.update",{id}); });
-  const [name,setName]=useState(""),[schemeId,setSchemeId]=useState(schemes[0]?.id||"");
+
+/* ---------------- Loại & Size (gộp) ---------------- */
+function TypeSizePanel({ user, types, setTypes, schemes, setSchemes }) {
+  const canEdit = can(user,"update","settings");
+
+  /* ===== Schemes ===== */
+  function saveSchemes(next, event, payload){ setSchemes(next); writeLS(LS.SCHEMES, next); audit(event, payload); }
+  const addScheme   = guard(user,"update","settings", (id,name)=>{ if(!id||!name) return; const next=[...schemes,{id,name,sizes:[]}]; saveSchemes(next,"scheme.add",{id}); });
+  const removeScheme= guard(user,"update","settings", (id)=>{ const next=schemes.filter(s=>s.id!==id); saveSchemes(next,"scheme.remove",{id}); });
+  const updateScheme= guard(user,"update","settings", (id,patch)=>{ const next=schemes.map(s=>s.id===id?{...s,...patch}:s); saveSchemes(next,"scheme.update",{id,patch}); });
+  const addSize     = guard(user,"update","settings", (sid,size)=>{ const next=schemes.map(s=>s.id===sid?{...s,sizes:[...s.sizes,size]}:s); saveSchemes(next,"scheme.size.add",{sid,size}); });
+  const delSize     = guard(user,"update","settings", (sid,key)=>{ const next=schemes.map(s=>s.id===sid?{...s,sizes:s.sizes.filter(z=>String(z.key)!==String(key))}:s); saveSchemes(next,"scheme.size.remove",{sid,key}); });
+
+  /* ===== Types ===== */
+  function saveTypes(next,event,payload){ setTypes(next); writeLS(LS.TYPES,next); audit(event,payload); }
+  const addType    = guard(user,"update","settings", (name, schemeId)=>{
+    const id=(name||"").toLowerCase().trim().replace(/\s+/g,"-");
+    if(!id||!schemeId) return;
+    if(types.some(t=>t.id===id)) return alert("ID đã tồn tại");
+    const t={ id, name: name||id, schemeId, sizes: [] }; // sizes=[] => dùng toàn bộ size của scheme
+    saveTypes([t, ...types],"type.add",{id});
+  });
+  const removeType = guard(user,"update","settings", (id)=>{ saveTypes(types.filter(t=>t.id!==id),"type.remove",{id}); });
+  const updateType = guard(user,"update","settings", (id,patch)=>{ saveTypes(types.map(t=>t.id===id?{...t,...patch}:t),"type.update",{id,patch}); });
+
+  const schemeById = useMemo(()=>Object.fromEntries((schemes||[]).map(s=>[s.id,s])),[schemes]);
+  const [newTypeName,setNewTypeName]=useState(""); 
+  const [newTypeScheme,setNewTypeScheme]=useState(schemes[0]?.id||"");
+
   return (
-    <div>
-      <div className="flex gap-2 mb-3">
-        <input className="border rounded px-2 py-1" placeholder="Tên loại" value={name} onChange={e=>setName(e.target.value)}/>
-        <select className="border rounded px-2 py-1" value={schemeId} onChange={e=>setSchemeId(e.target.value)}>
-          {schemes.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-        <button className="border rounded px-3" onClick={()=>{ if(!name) return; add(name,schemeId); setName(''); }}>Thêm</button>
-      </div>
-      <table className="w-full text-sm">
-        <thead><tr className="text-left border-b"><th className="py-2">ID</th><th>Tên</th><th>Scheme</th><th width="1"></th></tr></thead>
-        <tbody>
-          {types.map(t=>(
-            <tr key={t.id} className="border-b">
-              <td className="py-2">{t.id}</td>
-              <td><input className="border rounded px-2 py-1" defaultValue={t.name} onChange={e=>t._n=e.target.value}/></td>
-              <td><select className="border rounded px-2 py-1" defaultValue={t.schemeId} onChange={e=>t._s=e.target.value}>{schemes.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></td>
-              <td className="whitespace-nowrap">
-                <button className="border rounded px-2 mr-2" onClick={()=>update(t.id,{ name:t._n??t.name, schemeId:t._s??t.schemeId })}>Lưu</button>
-                <button className="text-red-600 border rounded px-2" onClick={()=>remove(t.id)}>Xoá</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-function SchemesPanel({ user, schemes, setSchemes }) {
-  const add = guard(user,"update","settings", (id,name)=>{ const next=[...schemes,{id,name,sizes:[]}]; setSchemes(next); writeLS(LS.SCHEMES,next); audit("scheme.add",{id}); });
-  const remove = guard(user,"update","settings", (id)=>{ const next=schemes.filter(s=>s.id!==id); setSchemes(next); writeLS(LS.SCHEMES,next); audit("scheme.remove",{id}); });
-  const update = guard(user,"update","settings", (id,patch)=>{ const next=schemes.map(s=>s.id===id?{...s,...patch}:s); setSchemes(next); writeLS(LS.SCHEMES,next); audit("scheme.update",{id}); });
-  const addSize = guard(user,"update","settings", (sid,size)=>{ const next=schemes.map(s=>s.id===sid?{...s,sizes:[...s.sizes,size]}:s); setSchemes(next); writeLS(LS.SCHEMES,next); audit("scheme.size.add",{sid}); });
-  const delSize = guard(user,"update","settings", (sid,key)=>{ const next=schemes.map(s=>s.id===sid?{...s,sizes:s.sizes.filter(z=>z.key!==key)}:s); setSchemes(next); writeLS(LS.SCHEMES,next); audit("scheme.size.remove",{sid,key}); });
-  const [id,setId]=useState(""),[name,setName]=useState("");
-  return (
-    <div>
-      <div className="flex gap-2 mb-3">
-        <input className="border rounded px-2 py-1" placeholder="ID" value={id} onChange={e=>setId(e.target.value)}/>
-        <input className="border rounded px-2 py-1" placeholder="Tên scheme" value={name} onChange={e=>setName(e.target.value)}/>
-        <button className="border rounded px-3" onClick={()=>{ if(!id||!name) return; add(id,name); setId(''); setName(''); }}>Thêm</button>
-      </div>
-      {schemes.map(s=>(
-        <div key={s.id} className="border rounded p-2 mb-3">
-          <div className="flex items-center gap-2 mb-2">
-            <input className="border rounded px-2 py-1 w-40" defaultValue={s.id} onChange={e=>s._i=e.target.value}/>
-            <input className="border rounded px-2 py-1 flex-1" defaultValue={s.name} onChange={e=>s._n=e.target.value}/>
-            <button className="border rounded px-2" onClick={()=>update(s.id,{ id:s._i??s.id, name:s._n??s.name })}>Lưu</button>
-            <button className="text-red-600 border rounded px-2" onClick={()=>remove(s.id)}>Xoá</button>
-          </div>
-          <table className="w-full text-sm">
-            <thead><tr className="text-left border-b"><th className="py-1">Key</th><th>Nhãn</th><th width="1"></th></tr></thead>
-            <tbody>
-              {s.sizes.map(z=>(
-                <tr key={z.key} className="border-b">
-                  <td className="py-1">{z.key}</td><td>{z.label}</td>
-                  <td className="whitespace-nowrap"><button className="text-red-600 border rounded px-2" onClick={()=>delSize(s.id,z.key)}>Xoá</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="flex gap-2 mt-2">
-            <input className="border rounded px-2 py-1 w-36" placeholder="key" onChange={e=>s._sk=e.target.value}/>
-            <input className="border rounded px-2 py-1 flex-1" placeholder="nhãn" onChange={e=>s._sl=e.target.value}/>
-            <button className="border rounded px-3" onClick={()=>addSize(s.id,{ key:s._sk, label:s._sl||s._sk })}>+ Size</button>
-          </div>
+    <div className="grid lg:grid-cols-2 gap-6">
+      {/* --- Cột 1: Quản lý Schemes (bảng size gốc) --- */}
+      <div>
+        <h3 className="font-semibold mb-2">Bảng size (Schemes)</h3>
+        <div className="flex gap-2 mb-3">
+          <input className="border rounded px-2 py-1 w-36" placeholder="ID (vd: round)" onChange={e=>TypeSizePanel._sid=e.target.value}/>
+          <input className="border rounded px-2 py-1 flex-1" placeholder="Tên (vd: Bánh tròn)" onChange={e=>TypeSizePanel._sname=e.target.value}/>
+          <button className="border rounded px-3" onClick={()=>addScheme(TypeSizePanel._sid, TypeSizePanel._sname)} disabled={!canEdit}>Thêm</button>
         </div>
-      ))}
+
+        {schemes.map(s=>(
+          <div key={s.id} className="border rounded p-3 mb-3">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <span className="text-sm text-gray-500">ID:</span>
+              <input className="border rounded px-2 py-1 w-40" defaultValue={s.id} onChange={e=>s._i=e.target.value}/>
+              <span className="text-sm text-gray-500">Tên:</span>
+              <input className="border rounded px-2 py-1 flex-1" defaultValue={s.name} onChange={e=>s._n=e.target.value}/>
+              <button className="border rounded px-2" onClick={()=>updateScheme(s.id,{ id:s._i??s.id, name:s._n??s.name })} disabled={!canEdit}>Lưu</button>
+              <button className="text-red-600 border rounded px-2" onClick={()=>removeScheme(s.id)} disabled={!canEdit}>Xoá</button>
+            </div>
+
+            <table className="w-full text-sm">
+              <thead><tr className="text-left border-b"><th className="py-1">Key</th><th>Nhãn</th><th width="1"></th></tr></thead>
+              <tbody>
+                {s.sizes.map(z=>(
+                  <tr key={z.key} className="border-b">
+                    <td className="py-1">{z.key}</td>
+                    <td>{z.label}</td>
+                    <td className="whitespace-nowrap">
+                      <button className="text-red-600 border rounded px-2" onClick={()=>delSize(s.id,z.key)} disabled={!canEdit}>Xoá</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="flex gap-2 mt-2">
+              <input className="border rounded px-2 py-1 w-32" placeholder="key (vd: 6)" onChange={e=>s._sk=e.target.value}/>
+              <input className="border rounded px-2 py-1 flex-1" placeholder="nhãn (vd: Size 6&quot;)" onChange={e=>s._sl=e.target.value}/>
+              <button className="border rounded px-3" onClick={()=>addSize(s.id,{ key:s._sk, label:s._sl||s._sk })} disabled={!canEdit}>+ Size</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* --- Cột 2: Quản lý Loại (chọn scheme + subset size) --- */}
+      <div>
+        <h3 className="font-semibold mb-2">Loại bánh (Types) & kích cỡ áp dụng</h3>
+        <div className="flex gap-2 mb-3">
+          <input className="border rounded px-2 py-1" placeholder="Tên loại (vd: Bánh tròn)" value={newTypeName} onChange={e=>setNewTypeName(e.target.value)}/>
+          <select className="border rounded px-2 py-1" value={newTypeScheme} onChange={e=>setNewTypeScheme(e.target.value)}>
+            {(schemes||[]).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <button className="border rounded px-3" onClick={()=>{ addType(newTypeName,newTypeScheme); setNewTypeName(""); }} disabled={!canEdit}>Thêm loại</button>
+        </div>
+
+        {types.map(t=>{
+          const sch = schemeById[t.schemeId];
+          const allSizes = sch?.sizes || [];
+          const chosen = new Set((t.sizes || []).map(String));
+          const useAll = (t.sizes || []).length === 0;
+
+          const toggleSize = (key) => {
+            let sizes = new Set(t.sizes || []);
+            if (sizes.has(key)) sizes.delete(key); else sizes.add(key);
+            updateType(t.id, { sizes: Array.from(sizes) });
+          };
+
+          const selectAll = () => updateType(t.id, { sizes: [] }); // rỗng = tất cả
+          const clearAll  = () => updateType(t.id, { sizes: [] }); // giữ rỗng để dùng toàn bộ
+
+          return (
+            <div key={t.id} className="border rounded p-3 mb-3">
+              <div className="flex flex-col md:flex-row md:items-center gap-2 mb-2">
+                <div className="flex items-center gap-2 flex-1">
+                  <span className="text-sm text-gray-500">ID:</span>
+                  <input className="border rounded px-2 py-1 w-40" defaultValue={t.id} onChange={e=>t._i=e.target.value}/>
+                  <span className="text-sm text-gray-500">Tên:</span>
+                  <input className="border rounded px-2 py-1 flex-1" defaultValue={t.name} onChange={e=>t._n=e.target.value}/>
+                  <span className="text-sm text-gray-500">Scheme:</span>
+                  <select className="border rounded px-2 py-1" defaultValue={t.schemeId} onChange={e=>t._s=e.target.value}>
+                    {(schemes||[]).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                  <button className="border rounded px-2"
+                          onClick={()=>updateType(t.id,{ id:t._i??t.id, name:t._n??t.name, schemeId:t._s??t.schemeId, sizes:t.sizes||[] })}
+                          disabled={!canEdit}>Lưu</button>
+                  <button className="text-red-600 border rounded px-2" onClick={()=>removeType(t.id)} disabled={!canEdit}>Xoá</button>
+                </div>
+              </div>
+
+              <div className="text-sm mb-2">
+                <span className="mr-2 text-gray-600">Kích cỡ áp dụng:</span>
+                <button className="underline mr-2" onClick={selectAll}>Dùng toàn bộ size của scheme</button>
+                <span className="text-gray-500">
+                  {useAll ? "đang dùng toàn bộ size" : "đang giới hạn theo lựa chọn bên dưới"}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {allSizes.map(sz=>{
+                  const checked = useAll ? true : chosen.has(String(sz.key));
+                  return (
+                    <label key={sz.key} className={`px-3 py-1 rounded-full border cursor-pointer ${checked ? "bg-gray-100" : ""}`}>
+                      <input type="checkbox" className="mr-2 align-middle"
+                             checked={checked} onChange={()=>toggleSize(String(sz.key))}/>
+                      {sz.label || sz.key}
+                    </label>
+                  );
+                })}
+                {allSizes.length===0 && (
+                  <div className="text-sm text-gray-500">Scheme này chưa có size. Hãy thêm size ở cột bên trái.</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
+
+/* ---------------- Levels ---------------- */
 function LevelsPanel({ user, levels, setLevels, schemes }) {
   const add = guard(user,"update","settings", (id,name,schemeId)=>{ const next=[...levels,{id,name,schemeId,prices:{}}]; setLevels(next); writeLS(LS.LEVELS,next); audit("level.add",{id}); });
   const remove = guard(user,"update","settings", (id)=>{ const next=levels.filter(l=>l.id!==id); setLevels(next); writeLS(LS.LEVELS,next); audit("level.remove",{id}); });
@@ -316,6 +409,8 @@ function LevelsPanel({ user, levels, setLevels, schemes }) {
     </div>
   );
 }
+
+/* ---------------- Tags ---------------- */
 function TagsPanel({ user, tags, setTags }) {
   const add = guard(user,"update","settings", (id,label)=>{ const next=[...tags,{id,label}]; setTags(next); writeLS(LS.TAGS,next); audit("tag.add",{id}); });
   const remove = guard(user,"update","settings", (id)=>{ const next=tags.filter(t=>t.id!==id); setTags(next); writeLS(LS.TAGS,next); audit("tag.remove",{id}); });
@@ -336,6 +431,8 @@ function TagsPanel({ user, tags, setTags }) {
     </div>
   );
 }
+
+/* ---------------- Users ---------------- */
 function UsersPanel({ user }) {
   const canManage = can(user,"manage","users");
   const users = authApi.allUsers(); const [list,setList]=useState(users);
@@ -366,6 +463,8 @@ function UsersPanel({ user }) {
     </div>
   );
 }
+
+/* ---------------- Audit ---------------- */
 function AuditPanel() {
   const items = readAudit();
   return (

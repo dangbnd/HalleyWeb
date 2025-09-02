@@ -1,13 +1,19 @@
+// src/components/CategoryBar.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 
-function Chip({ active, children, onClick }) {
+function Chip({ active, children, onClick, dataKey }) {
   return (
     <button
+      data-key={dataKey}
       onClick={onClick}
       className={
-        "px-3 py-1 rounded-full border text-sm whitespace-nowrap transition-colors " +
-        (active ? "bg-gray-100 border-gray-400" : "hover:bg-gray-50")
+        "px-3 py-1.5 rounded-full border text-sm whitespace-nowrap transition " +
+        (active
+          ? "bg-rose-600 text-white border-rose-600 ring-2 ring-rose-300 shadow-md scale-105"
+          : "text-gray-700 hover:bg-gray-50")
       }
+      role="tab"
+      aria-selected={active}
     >
       {children}
     </button>
@@ -16,7 +22,7 @@ function Chip({ active, children, onClick }) {
 
 export default function CategoryBar({
   categories = [],
-  currentKey,
+  currentKey = "all",
   onPick,
   sticky = false,
   showFilterButton = false,
@@ -24,12 +30,20 @@ export default function CategoryBar({
 }) {
   const wrapRef = useRef(null);
   const railRef = useRef(null);
+  const popRef = useRef(null);
   const [hasLeft, setHasLeft] = useState(false);
   const [hasRight, setHasRight] = useState(false);
   const [allOpen, setAllOpen] = useState(false);
   const [q, setQ] = useState("");
 
-  // cập nhật trạng thái mũi tên & fade
+  // Tự cuộn pill đang active vào giữa
+  useEffect(() => {
+    const sel = String(currentKey).replace(/"/g, '\\"');
+    const el = wrapRef.current?.querySelector(`[data-key="${sel}"]`);
+    el?.scrollIntoView?.({ behavior: "smooth", inline: "center", block: "nearest" });
+  }, [currentKey, categories.length]);
+
+  // Cập nhật trạng thái mũi tên & fade
   const update = () => {
     const el = railRef.current;
     if (!el) return;
@@ -51,14 +65,21 @@ export default function CategoryBar({
     };
   }, []);
 
-  // cuộn mượt
-  const scrollByX = (dx) => {
-    const el = railRef.current;
-    if (!el) return;
-    el.scrollBy({ left: dx, behavior: "smooth" });
-  };
+  // Đóng popover khi click ra ngoài
+  useEffect(() => {
+    if (!allOpen) return;
+    const onDoc = (e) => {
+      if (!popRef.current) return;
+      if (!popRef.current.contains(e.target)) setAllOpen(false);
+    };
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, [allOpen]);
 
-  // lọc trong popover
+  // Cuộn mượt
+  const scrollByX = (dx) => railRef.current?.scrollBy({ left: dx, behavior: "smooth" });
+
+  // Lọc trong popover
   const norm = (s = "") =>
     s.toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const filtered = useMemo(
@@ -66,13 +87,12 @@ export default function CategoryBar({
     [categories, q]
   );
 
-  const clsWrap =
-    (sticky ? "sticky top-[64px] z-10 border-b " : "");
+  const clsWrap = sticky ? "sticky top-[64px] z-10 border-b" : "";
 
   return (
     <section className={clsWrap}>
-      <div ref={wrapRef} className="relative max-w-6xl mx-auto px-4 py-3">
-        {/* fade hai mép */}
+      <div ref={wrapRef} className="relative max-w-6xl mx-auto px-4 py-3" role="tablist" aria-label="Danh mục">
+        {/* fades */}
         {hasLeft && (
           <div className="pointer-events-none absolute left-0 top-0 h-full w-8 bg-gradient-to-r from-white to-transparent" />
         )}
@@ -92,11 +112,10 @@ export default function CategoryBar({
             ‹
           </button>
 
-          {/* rail cuộn ngang */}
+          {/* rail */}
           <div
             ref={railRef}
             className="flex-1 min-w-0 overflow-x-auto scrollbar-none [-ms-overflow-style:none] [scrollbar-width:none]"
-            // kéo chuột ngang = cuộn
             onWheel={(e) => {
               if (Math.abs(e.deltaX) < Math.abs(e.deltaY)) {
                 railRef.current?.scrollBy({ left: e.deltaY, behavior: "auto" });
@@ -107,6 +126,7 @@ export default function CategoryBar({
               {categories.map((c) => (
                 <Chip
                   key={c.key}
+                  dataKey={c.key}            /* <== Quan trọng để auto-scroll hoạt động */
                   active={currentKey === c.key}
                   onClick={() => onPick?.(c.key)}
                 >
@@ -127,11 +147,11 @@ export default function CategoryBar({
             ›
           </button>
 
-          {/* nút mở All + Lọc */}
+          {/* All + Lọc */}
           <div className="flex items-center gap-2">
             <button
               onClick={() => setAllOpen((v) => !v)}
-              className="rounded-full border px-3 py-1 text-sm hover:bg-gray-50"
+              className="rounded-full border px-3 py-1.5 text-sm hover:bg-gray-50"
               aria-label="Tất cả danh mục"
               title="Tất cả danh mục"
             >
@@ -140,7 +160,7 @@ export default function CategoryBar({
             {showFilterButton && (
               <button
                 onClick={onOpenFilters}
-                className="rounded-full border px-3 py-1 text-sm hover:bg-gray-50"
+                className="rounded-full border px-3 py-1.5 text-sm hover:bg-gray-50"
                 aria-label="Mở bộ lọc"
               >
                 Lọc
@@ -152,8 +172,8 @@ export default function CategoryBar({
         {/* Popover All */}
         {allOpen && (
           <div
+            ref={popRef}
             className="absolute right-4 mt-2 w-[min(90vw,28rem)] rounded-xl border bg-white shadow-lg p-3 z-20"
-            onMouseLeave={() => setAllOpen(false)}
           >
             <div className="flex items-center gap-2 mb-2">
               <input
@@ -162,10 +182,7 @@ export default function CategoryBar({
                 onChange={(e) => setQ(e.target.value)}
                 className="flex-1 rounded-lg border px-3 py-2 text-sm"
               />
-              <button
-                className="rounded-lg border px-3 py-2 text-sm"
-                onClick={() => setAllOpen(false)}
-              >
+              <button className="rounded-lg border px-3 py-2 text-sm" onClick={() => setAllOpen(false)}>
                 Đóng
               </button>
             </div>
@@ -180,16 +197,14 @@ export default function CategoryBar({
                   }}
                   className={
                     "text-left px-3 py-2 rounded-lg border hover:bg-gray-50 text-sm " +
-                    (currentKey === c.key ? "bg-gray-100 border-gray-400" : "")
+                    (currentKey === c.key ? "bg-rose-50 border-rose-300" : "")
                   }
                 >
                   {c.title || c.key}
                 </button>
               ))}
               {filtered.length === 0 && (
-                <div className="text-sm text-gray-500 px-1 py-3 col-span-full">
-                  Không có kết quả
-                </div>
+                <div className="text-sm text-gray-500 px-1 py-3 col-span-full">Không có kết quả</div>
               )}
             </div>
           </div>
